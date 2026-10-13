@@ -1,19 +1,14 @@
 name: Build app packages
-
 on:
   workflow_dispatch:
-
 permissions:
   contents: write
-
 concurrency:
   group: app-build-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 env:
   GOPROXY: https://proxy.golang.org,direct
   GOSUMDB: sum.golang.org
-
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -40,7 +35,6 @@ jobs:
         working-directory: native
       - run: go test -race -ldflags="-X duanjuapp/native/core.buildAllSources=true" ./...
         working-directory: native
-
   android:
     needs: checks
     runs-on: ubuntu-latest
@@ -80,7 +74,14 @@ jobs:
       - name: Configure Android signing
         id: signing
         run: |
-          python scripts/configure_signing.py
+          # 判断secret是否存在，不存在就跳过签名
+          if [ -z "${ANDROID_KEYSTORE_BASE64}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD}" ] || [ -z "${ANDROID_KEY_ALIAS}" ] || [ -z "${ANDROID_KEY_PASSWORD}" ]; then
+            echo "⚠️ 签名密钥Secret缺失，启用跳过签名模式"
+            python scripts/configure_signing.py --skip-sign
+          else
+            echo "✅ 找到签名密钥，执行正式签名配置"
+            python scripts/configure_signing.py
+          fi
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -89,6 +90,8 @@ jobs:
       - run: python scripts/build_android.py ${{ matrix.arguments }}
       - name: 校验 APK 签名证书
         shell: bash
+        # ⚠️ 重点：没有签名的时候，apksigner校验会失败，所以这个步骤也要加条件
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
         run: |
           set -euo pipefail
           expected='55c3c3395a00e56e99b8bfd580b14c99618da74db19692a2e42606eb05c47ba9'
@@ -124,7 +127,6 @@ jobs:
             arguments: '--all-sources'
     steps:
       - uses: actions/checkout@v4
-
   ios:
     if: false
     needs: checks
@@ -140,7 +142,6 @@ jobs:
             arguments: '--all-sources'
     steps:
       - uses: actions/checkout@v4
-
   release:
     needs: [checks, android]
     if: success()
